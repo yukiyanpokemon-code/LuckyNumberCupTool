@@ -44,11 +44,16 @@
             font-size: 20px;
             font-weight: bold;
         }
+        #loading {
+            margin-top: 10px;
+            font-size: 18px;
+            color: #333;
+        }
     </style>
 </head>
 <body>
 
-<h2>ポケモン図鑑検索（最大6体）</h2>
+<h2>ポケモン図鑑No検索（6体 + 数字カウント）</h2>
 
 <p>ポケモンの名前（日本語 or 英語）を最大6つ入力してください。</p>
 <p>フォルムチェンジは含めず入力してください（例）霊獣ランドロス→ランドロス</p>
@@ -62,18 +67,24 @@
     <input id="p6" placeholder="ポケモン名6">
 </div>
 
-<button onclick="searchAll()">検索</button>
+<button id="search-btn" onclick="searchAll()">検索</button>
+<div id="loading"></div>
 
 <div id="results"></div>
 <div id="digit-count"></div>
 <div id="warning"></div>
 
 <script>
-    // 日本語名 → 英語名
     let nameMap = {};
 
-    // ページ読み込み時に日本語名を全取得
+    // ★ 読み込み完了までボタン無効化 & メッセージ表示
     async function loadJapaneseNames() {
+        const btn = document.getElementById("search-btn");
+        const loadingMsg = document.getElementById("loading");
+
+        btn.disabled = true;
+        loadingMsg.innerHTML = "図鑑情報取得中…（初回のみ時間がかかります）";
+
         for (let id = 1; id <= 1025; id++) {
             try {
                 const res = await fetch(`https://pokeapi.co/api/v2/pokemon-species/${id}`);
@@ -89,29 +100,28 @@
                 console.error("読み込み失敗:", id);
             }
         }
+
+        btn.disabled = false;
+        loadingMsg.innerHTML = "";
     }
     loadJapaneseNames();
 
-    // 名前変換（前方一致対応）
+
     function normalizeName(inputName) {
         if (!inputName) return null;
-
         const name = inputName.trim().toLowerCase();
 
-        // ▼ 日本語名：前方一致検索
         let jpMatch = Object.keys(nameMap).find(jp => jp.startsWith(name));
         if (jpMatch) return nameMap[jpMatch];
 
-        // ▼ 日本語名に無ければ英語名で前方一致
-        let enList = Object.values(nameMap);        // 英語名一覧
+        let enList = Object.values(nameMap);
         let enMatch = enList.find(en => en.startsWith(name));
         if (enMatch) return enMatch;
 
-        // ▼ 一致しなければそのまま（API 名として扱う）
         return name;
     }
 
-    // 図鑑番号取得
+
     async function fetchDexNumber(name) {
         try {
             const apiName = normalizeName(name);
@@ -127,7 +137,7 @@
         }
     }
 
-    // 6体検索
+
     async function searchAll() {
         const results = document.getElementById("results");
         const digitCount = document.getElementById("digit-count");
@@ -143,7 +153,7 @@
         ];
 
         let html = "";
-        let allDigits = "";  // 図鑑番号を全部連結する
+        let allDigits = "";
 
         for (let i = 0; i < inputs.length; i++) {
             const name = inputs[i].trim();
@@ -161,22 +171,17 @@
 
         results.innerHTML = html || "入力がありません。";
 
-        // --- 数字カウント ---
         if (allDigits.length > 0) {
             const count = {0:0,1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0};
 
-            for (let ch of allDigits) {
-                count[ch]++;
-            }
+            for (let ch of allDigits) count[ch]++;
 
-            // 表示
             let countText = "<h3>数字の出現回数</h3>";
             for (let i = 0; i <= 9; i++) {
                 countText += `${i}：${count[i]}回<br>`;
             }
             digitCount.innerHTML = countText;
 
-            // 3つ以上出現した数字があるか判定
             let alertDigits = [];
             for (let i = 0; i <= 9; i++) {
                 if (count[i] >= 3) alertDigits.push(i);
