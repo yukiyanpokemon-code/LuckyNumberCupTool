@@ -45,7 +45,7 @@
             font-weight: bold;
         }
         #loading {
-            margin-top: 15px;
+            margin-top: 10px;
             font-size: 18px;
             color: #333;
         }
@@ -53,9 +53,10 @@
 </head>
 <body>
 
-<h2>ポケモン図鑑検索（最大6体）</h2>
+<h2>ポケモン図鑑No検索（6体 + 数字カウント）</h2>
 
 <p>ポケモンの名前（日本語 or 英語）を最大6つ入力してください。</p>
+<p>フォルムチェンジは含めず入力してください（例）霊獣ランドロス→ランドロス</p>
 
 <div id="inputs">
     <input id="p1" placeholder="ポケモン名1">
@@ -96,55 +97,36 @@
         }
         await Promise.all(tasks);
     }
-
-    // --------------------------
-    // ★ 進捗表示 + キャッシュ利用
-    // --------------------------
+    // ★ 読み込み完了までボタン無効化 & メッセージ表示
     async function loadJapaneseNames() {
         const btn = document.getElementById("search-btn");
         const loadingMsg = document.getElementById("loading");
 
-         キャッシュ存在時：即座に読み込み完了にする
-        const cache = localStorage.getItem("nameMap");
-        if (cache) {
-            nameMap = JSON.parse(cache);
-            loadingMsg.innerHTML = "日本語データをキャッシュから読み込みました。";
-            setTimeout(() => loadingMsg.innerHTML = "", 800);
-            return;
-        }
-
-        // 初回は API 取得
         btn.disabled = true;
-        loadingMsg.innerHTML = "図鑑データ取得中… 0%";
+        loadingMsg.innerHTML = "図鑑情報取得中…（初回のみ時間がかかります）";
 
-        const batchSize = 20;
-        let completed = 0;
+        for (let id = 1; id <= 1025; id++) {
+            try {
+                const res = await fetch(`https://pokeapi.co/api/v2/pokemon-species/${id}`);
+                const data = await res.json();
 
-        for (let start = 1; start <= TOTAL; start += batchSize) {
-            const end = Math.min(start + batchSize - 1, TOTAL);
-            await fetchBatch(start, end);
+                const japaneseName = data.names.find(n => n.language.name === "ja-Hrkt")?.name;
+                const englishName = data.name;
 
-            // 進捗更新
-            completed = end;
-            const percent = Math.floor((completed / TOTAL) * 100);
-            loadingMsg.innerHTML = `図鑑データ取得中… ${completed}/${TOTAL} 件（${percent}%）`;
+                if (japaneseName) {
+                    nameMap[japaneseName.toLowerCase()] = englishName;
+                }
+            } catch (e) {
+                console.error("読み込み失敗:", id);
+            }
         }
-
-        // キャッシュ保存
-        localStorage.setItem("nameMap", JSON.stringify(nameMap));
-
-        // 完了表示
-        loadingMsg.innerHTML = "読み込み完了！";
-        setTimeout(() => loadingMsg.innerHTML = "", 800);
 
         btn.disabled = false;
+        loadingMsg.innerHTML = "";
     }
     loadJapaneseNames();
 
 
-    // --------------------------
-    // 名前正規化
-    // --------------------------
     function normalizeName(inputName) {
         if (!inputName) return null;
         const name = inputName.trim().toLowerCase();
@@ -159,9 +141,7 @@
         return name;
     }
 
-    // --------------------------
-    // 図鑑番号取得
-    // --------------------------
+
     async function fetchDexNumber(name) {
         try {
             const apiName = normalizeName(name);
@@ -177,9 +157,7 @@
         }
     }
 
-    // --------------------------
-    // 6体検索
-    // --------------------------
+
     async function searchAll() {
         const results = document.getElementById("results");
         const digitCount = document.getElementById("digit-count");
@@ -189,13 +167,16 @@
         digitCount.innerHTML = "";
         warning.innerHTML = "";
 
-        const inputs = [p1.value, p2.value, p3.value, p4.value, p5.value, p6.value];
+        const inputs = [
+            p1.value, p2.value, p3.value,
+            p4.value, p5.value, p6.value
+        ];
 
         let html = "";
         let allDigits = "";
 
-        for (let name of inputs) {
-            name = name.trim();
+        for (let i = 0; i < inputs.length; i++) {
+            const name = inputs[i].trim();
             if (!name) continue;
 
             const dex = await fetchDexNumber(name);
