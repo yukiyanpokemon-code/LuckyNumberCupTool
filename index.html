@@ -1,13 +1,44 @@
 <script>
     let nameMap = {};
 
-    // ★ 高速版：1回で全species取得 → 各詳細を並列読み込み
+    // ★ 並列数を制限する Promise 実行関数
+    async function limitedParallel(urls, limit, onProgress) {
+        let index = 0;
+        let completed = 0;
+        const total = urls.length;
+        const results = new Array(total);
+
+        async function worker() {
+            while (index < total) {
+                const i = index++;
+                const url = urls[i];
+
+                try {
+                    const res = await fetch(url);
+                    results[i] = await res.json();
+                } catch (e) {
+                    results[i] = null;
+                }
+
+                completed++;
+                onProgress(completed, total);
+            }
+        }
+
+        // limit 個の worker を同時に走らせる
+        const workers = Array.from({ length: limit }, worker);
+        await Promise.all(workers);
+
+        return results;
+    }
+
+    // ★ 図鑑情報ロード（20並列 + 進捗率表示）
     async function loadJapaneseNames() {
         const btn = document.getElementById("search-btn");
         const loadingMsg = document.getElementById("loading");
 
         btn.disabled = true;
-        loadingMsg.innerHTML = "図鑑情報取得中…（初回のみ）";
+        loadingMsg.innerHTML = "図鑑情報取得中… 0%";
 
         try {
             // 1. 全 species 一括取得
@@ -15,29 +46,24 @@
             const listData = await listRes.json();
 
             const urls = listData.results.map(x => x.url);
-            let loaded = 0;
 
-            // 2. 各種データを並列 fetch（Promise.all で高速化）
-            const speciesData = await Promise.all(
-                urls.map(async url => {
-                    const res = await fetch(url);
-                    const data = await res.json();
+            // 進捗表示
+            const updateProgress = (done, total) => {
+                const percent = Math.floor((done / total) * 100);
+                loadingMsg.innerHTML = `図鑑情報取得中… ${percent}%`;
+            };
 
-                    // 進捗表示（体感速度UP）
-                    loaded++;
-                    if (loaded % 50 === 0) {
-                        loadingMsg.innerHTML = `読み込み中… ${loaded}/${urls.length}`;
-                    }
-                    return data;
-                })
-            );
+            // 2. 制限付き並列（20個ずつ）
+            const speciesData = await limitedParallel(urls, 20, updateProgress);
 
-            // 3. 日本語名 → 英語名 の対応表を作成
+            // 3. 日本語名 → 英語名 対応表生成
             for (const data of speciesData) {
+                if (!data) continue;
                 const jp = data.names.find(n => n.language.name === "ja-Hrkt")?.name;
                 const en = data.name;
                 if (jp) nameMap[jp.toLowerCase()] = en;
             }
+
         } catch (e) {
             console.error(e);
             loadingMsg.innerHTML = "読み込み失敗しました";
@@ -50,7 +76,9 @@
     loadJapaneseNames();
 
 
-    // 以下は元のままでOK
+    // ==============================================
+    // 以下、あなたの元コードと変わりません
+    // ==============================================
     function normalizeName(inputName) {
         if (!inputName) return null;
         const name = inputName.trim().toLowerCase();
