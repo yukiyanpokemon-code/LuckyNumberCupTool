@@ -1,125 +1,248 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>ポケモン図鑑No検索（6体 + 数字カウント）</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 650px;
+            margin: 40px auto;
+            padding: 20px;
+            line-height: 1.6;
+            border: 1px solid #ccc;
+            border-radius: 10px;
+        }
+        input {
+            padding: 10px;
+            font-size: 16px;
+            margin-bottom: 10px;
+            width: 95%;
+        }
+        button {
+            padding: 10px;
+            font-size: 18px;
+            width: 100%;
+            margin-top: 20px;
+        }
+        .result-item {
+            font-size: 18px;
+            margin: 10px 0;
+            padding: 8px;
+            background: #f4f4f4;
+            border-radius: 6px;
+        }
+        #digit-count {
+            margin-top: 20px;
+            background: #eef;
+            padding: 10px;
+            border-radius: 6px;
+        }
+        #warning {
+            margin-top: 10px;
+            color: red;
+            font-size: 20px;
+            font-weight: bold;
+        }
+        #loading {
+            margin-top: 10px;
+            font-size: 18px;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+
+<h2>ポケモン図鑑No検索（6体 + 数字カウント）</h2>
+
+<p>ポケモンの名前（日本語 or 英語）を最大6つ入力してください。</p>
+<p>フォルムチェンジは含めず入力してください（例）霊獣ランドロス→ランドロス</p>
+
+<div id="inputs">
+    <input id="p1" placeholder="ポケモン名1">
+    <input id="p2" placeholder="ポケモン名2">
+    <input id="p3" placeholder="ポケモン名3">
+    <input id="p4" placeholder="ポケモン名4">
+    <input id="p5" placeholder="ポケモン名5">
+    <input id="p6" placeholder="ポケモン名6">
+</div>
+
+<button id="search-btn" onclick="searchAll()">検索</button>
+<div id="loading"></div>
+
+<div id="results"></div>
+<div id="digit-count"></div>
+<div id="warning"></div>
+
 <script>
-    let nameMap = {};
+let nameMap = {};        // 日本語名 → { en, id }
+let allSpeciesList = []; // 一覧URL
 
-    // ★ 読み込み完了までボタン無効化 & メッセージ表示 + 進捗率表示追加
-    async function loadJapaneseNames() {
-        const btn = document.getElementById("search-btn");
-        const loadingMsg = document.getElementById("loading");
+// ----------------------
+// 図鑑情報ロード（20並列）
+// ----------------------
+async function loadJapaneseNames() {
+    const btn = document.getElementById("search-btn");
+    const loadingMsg = document.getElementById("loading");
 
-        btn.disabled = true;
-        const total = 1025;
-        loadingMsg.innerHTML = "図鑑情報取得中… 0%";
+    btn.disabled = true;
+    loadingMsg.innerHTML = "図鑑情報取得中…（初回のみ時間がかかります）";
 
-        for (let id = 1; id <= total; id++) {
-            try {
-                const res = await fetch(`https://pokeapi.co/api/v2/pokemon-species/${id}`);
-                const data = await res.json();
+    // 一覧取得（1回）
+    const listRes = await fetch("https://pokeapi.co/api/v2/pokemon-species?limit=2000");
+    const listData = await listRes.json();
+    allSpeciesList = listData.results.slice(0, 1025);
 
-                const japaneseName = data.names.find(n => n.language.name === "ja-Hrkt")?.name;
-                const englishName = data.name;
+    const total = allSpeciesList.length;
+    let completed = 0;
 
-                if (japaneseName) {
-                    nameMap[japaneseName.toLowerCase()] = englishName;
-                }
-
-            } catch (e) {
-                console.error("読み込み失敗:", id);
-            }
-
-            // ★ 進捗率表示
-            const percent = Math.floor((id / total) * 100);
-            loadingMsg.innerHTML = `図鑑情報取得中… ${percent}%`;
-        }
-
-        btn.disabled = false;
-        loadingMsg.innerHTML = "";
-    }
-    loadJapaneseNames();
-
-
-    function normalizeName(inputName) {
-        if (!inputName) return null;
-        const name = inputName.trim().toLowerCase();
-
-        let jpMatch = Object.keys(nameMap).find(jp => jp.startsWith(name));
-        if (jpMatch) return nameMap[jpMatch];
-
-        let enList = Object.values(nameMap);
-        let enMatch = enList.find(en => en.startsWith(name));
-        if (enMatch) return enMatch;
-
-        return name;
-    }
-
-
-    async function fetchDexNumber(name) {
+    // 1件処理関数（安全版）
+    async function fetchSpeciesData(url) {
         try {
-            const apiName = normalizeName(name);
-            if (!apiName) return null;
-
-            const res = await fetch(`https://pokeapi.co/api/v2/pokemon-species/${apiName}`);
-            if (!res.ok) return null;
-
+            const res = await fetch(url);
             const data = await res.json();
-            return data.id;
-        } catch {
-            return null;
+
+            const names = data.names || [];
+            const japaneseName =
+                names.find(n => n.language?.name === "ja-Hrkt")?.name;
+
+            const englishName = data.name || null;
+
+            if (japaneseName && englishName && data.id) {
+                nameMap[japaneseName.toLowerCase()] = {
+                    en: englishName,
+                    id: data.id
+                };
+            }
+        } catch (e) {
+            console.error("取得失敗:", url, e);
+        } finally {
+            completed++;
+            const percent = Math.floor((completed / total) * 100);
+            loadingMsg.innerHTML = `図鑑情報取得中… ${completed} / ${total}（${percent}%）`;
         }
     }
 
+    // ------- 20並列実行 -------
+    const concurrency = 20;
+    let index = 0;
 
-    async function searchAll() {
-        const results = document.getElementById("results");
-        const digitCount = document.getElementById("digit-count");
-        const warning = document.getElementById("warning");
-
-        results.innerHTML = "検索中…";
-        digitCount.innerHTML = "";
-        warning.innerHTML = "";
-
-        const inputs = [
-            p1.value, p2.value, p3.value,
-            p4.value, p5.value, p6.value
-        ];
-
-        let html = "";
-        let allDigits = "";
-
-        for (let i = 0; i < inputs.length; i++) {
-            const name = inputs[i].trim();
-            if (!name) continue;
-
-            const dex = await fetchDexNumber(name);
-
-            if (dex) {
-                html += `<div class="result-item">${name} → 図鑑番号：${dex}</div>`;
-                allDigits += dex.toString();
-            } else {
-                html += `<div class="result-item">${name} → 見つかりません</div>`;
-            }
+    const workers = Array.from({ length: concurrency }).map(async () => {
+        while (index < total) {
+            const url = allSpeciesList[index].url;
+            index++;
+            await fetchSpeciesData(url);
         }
+    });
 
-        results.innerHTML = html || "入力がありません。";
+    await Promise.all(workers);
 
-        if (allDigits.length > 0) {
-            const count = {0:0,1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0};
+    loadingMsg.innerHTML = "";
+    btn.disabled = false;
+}
 
-            for (let ch of allDigits) count[ch]++;
+// ----------------------
+// 名前正規化（エラー安全版）
+// ----------------------
+function normalizeName(inputName) {
+    if (!inputName) return null;
+    const name = inputName.trim().toLowerCase();
 
-            let countText = "<h3>数字の出現回数</h3>";
-            for (let i = 0; i <= 9; i++) {
-                countText += `${i}：${count[i]}回<br>`;
-            }
-            digitCount.innerHTML = countText;
+    // 日本語名検索
+    for (const jp of Object.keys(nameMap)) {
+        if (jp.startsWith(name)) return jp;
+    }
 
-            let alertDigits = [];
-            for (let i = 0; i <= 9; i++) {
-                if (count[i] >= 3) alertDigits.push(i);
-            }
-
-            if (alertDigits.length > 0) {
-                warning.innerHTML = `⚠️ 数字「${alertDigits.join(", ")}」が3つ以上含まれています！`;
-            }
+    // 英語名検索
+    for (const obj of Object.values(nameMap)) {
+        if (obj && obj.en && obj.en.startsWith(name)) {
+            return obj.en;
         }
     }
+
+    return name;
+}
+
+// ----------------------
+// 図鑑番号取得（キャッシュのみ）
+// ----------------------
+function fetchDexNumber(inputName) {
+    const normalized = normalizeName(inputName);
+    if (!normalized) return null;
+
+    // 日本語名で一致
+    if (nameMap[normalized]) return nameMap[normalized].id;
+
+    // 英語名で一致
+    for (const obj of Object.values(nameMap)) {
+        if (obj.en === normalized) return obj.id;
+    }
+
+    return null;
+}
+
+// ----------------------
+// 検索処理本体
+// ----------------------
+async function searchAll() {
+    const results = document.getElementById("results");
+    const digitCount = document.getElementById("digit-count");
+    const warning = document.getElementById("warning");
+
+    results.innerHTML = "検索中…";
+    digitCount.innerHTML = "";
+    warning.innerHTML = "";
+
+    const inputs = [
+        p1.value, p2.value, p3.value,
+        p4.value, p5.value, p6.value
+    ];
+
+    let html = "";
+    let allDigits = "";
+
+    for (let i = 0; i < inputs.length; i++) {
+        const name = inputs[i].trim();
+        if (!name) continue;
+
+        const dex = fetchDexNumber(name);
+
+        if (dex) {
+            html += `<div class="result-item">${name} → 図鑑番号：${dex}</div>`;
+            allDigits += dex.toString();
+        } else {
+            html += `<div class="result-item">${name} → 見つかりません</div>`;
+        }
+    }
+
+    results.innerHTML = html || "入力がありません。";
+
+    // 数字集計
+    if (allDigits.length > 0) {
+        const count = Array(10).fill(0);
+        for (let ch of allDigits) count[ch]++;
+
+        let countText = "<h3>数字の出現回数</h3>";
+        for (let i = 0; i <= 9; i++) {
+            countText += `${i}：${count[i]}回<br>`;
+        }
+        digitCount.innerHTML = countText;
+
+        const alertDigits = [];
+        for (let i = 0; i <= 9; i++) {
+            if (count[i] >= 3) alertDigits.push(i);
+        }
+
+        if (alertDigits.length > 0) {
+            warning.innerHTML =
+                `⚠️ 数字「${alertDigits.join(", ")}」が3つ以上含まれています！`;
+        }
+    }
+}
+
+// 起動時ロード開始
+loadJapaneseNames();
 </script>
+
+</body>
+</html>
