@@ -1,63 +1,42 @@
 <script>
     let nameMap = {};
 
-    // ★ 高速版：1回で全species取得 → 各詳細を並列読み込み + 進捗率表示
+    // ★ 読み込み完了までボタン無効化 & メッセージ表示 + 進捗率表示追加
     async function loadJapaneseNames() {
         const btn = document.getElementById("search-btn");
         const loadingMsg = document.getElementById("loading");
 
         btn.disabled = true;
+        const total = 1025;
         loadingMsg.innerHTML = "図鑑情報取得中… 0%";
 
-        try {
-            // 1. 全 species 一括取得
-            const listRes = await fetch("https://pokeapi.co/api/v2/pokemon-species?limit=2000");
-            const listData = await listRes.json();
+        for (let id = 1; id <= total; id++) {
+            try {
+                const res = await fetch(`https://pokeapi.co/api/v2/pokemon-species/${id}`);
+                const data = await res.json();
 
-            const urls = listData.results.map(x => x.url);
-            let loaded = 0;
-            const total = urls.length;
+                const japaneseName = data.names.find(n => n.language.name === "ja-Hrkt")?.name;
+                const englishName = data.name;
 
-            // 進捗更新関数
-            const updateProgress = () => {
-                const percent = Math.floor((loaded / total) * 100);
-                loadingMsg.innerHTML = `図鑑情報取得中… ${percent}%`;
-            };
+                if (japaneseName) {
+                    nameMap[japaneseName.toLowerCase()] = englishName;
+                }
 
-            updateProgress();
-
-            // 2. 各種データを並列 fetch（Promise.all）
-            const speciesData = await Promise.all(
-                urls.map(async url => {
-                    const res = await fetch(url);
-                    const data = await res.json();
-
-                    loaded++;
-                    updateProgress();
-
-                    return data;
-                })
-            );
-
-            // 3. 日本語名 → 英語名 の対応表を作成
-            for (const data of speciesData) {
-                const jp = data.names.find(n => n.language.name === "ja-Hrkt")?.name;
-                const en = data.name;
-                if (jp) nameMap[jp.toLowerCase()] = en;
+            } catch (e) {
+                console.error("読み込み失敗:", id);
             }
-        } catch (e) {
-            console.error(e);
-            loadingMsg.innerHTML = "読み込み失敗しました";
+
+            // ★ 進捗率表示
+            const percent = Math.floor((id / total) * 100);
+            loadingMsg.innerHTML = `図鑑情報取得中… ${percent}%`;
         }
 
-        loadingMsg.innerHTML = "";
         btn.disabled = false;
+        loadingMsg.innerHTML = "";
     }
-
     loadJapaneseNames();
 
 
-    // ここから下は今までのままでOK
     function normalizeName(inputName) {
         if (!inputName) return null;
         const name = inputName.trim().toLowerCase();
@@ -71,6 +50,7 @@
 
         return name;
     }
+
 
     async function fetchDexNumber(name) {
         try {
@@ -86,6 +66,7 @@
             return null;
         }
     }
+
 
     async function searchAll() {
         const results = document.getElementById("results");
