@@ -1,132 +1,56 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <title>ポケモン図鑑No検索（6体 + 数字カウント）</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 650px;
-            margin: 40px auto;
-            padding: 20px;
-            line-height: 1.6;
-            border: 1px solid #ccc;
-            border-radius: 10px;
-        }
-        input {
-            padding: 10px;
-            font-size: 16px;
-            margin-bottom: 10px;
-            width: 95%;
-        }
-        button {
-            padding: 10px;
-            font-size: 18px;
-            width: 100%;
-            margin-top: 20px;
-        }
-        .result-item {
-            font-size: 18px;
-            margin: 10px 0;
-            padding: 8px;
-            background: #f4f4f4;
-            border-radius: 6px;
-        }
-        #digit-count {
-            margin-top: 20px;
-            background: #eef;
-            padding: 10px;
-            border-radius: 6px;
-        }
-        #warning {
-            margin-top: 10px;
-            color: red;
-            font-size: 20px;
-            font-weight: bold;
-        }
-        #loading {
-            margin-top: 10px;
-            font-size: 18px;
-            color: #333;
-        }
-    </style>
-</head>
-<body>
-
-<h2>ポケモン図鑑No検索（6体 + 数字カウント）</h2>
-
-<p>ポケモンの名前（日本語 or 英語）を最大6つ入力してください。</p>
-<p>フォルムチェンジは含めず入力してください（例）霊獣ランドロス→ランドロス</p>
-
-<div id="inputs">
-    <input id="p1" placeholder="ポケモン名1">
-    <input id="p2" placeholder="ポケモン名2">
-    <input id="p3" placeholder="ポケモン名3">
-    <input id="p4" placeholder="ポケモン名4">
-    <input id="p5" placeholder="ポケモン名5">
-    <input id="p6" placeholder="ポケモン名6">
-</div>
-
-<button id="search-btn" onclick="searchAll()">検索</button>
-<div id="loading"></div>
-
-<div id="results"></div>
-<div id="digit-count"></div>
-<div id="warning"></div>
-
 <script>
     let nameMap = {};
-    const TOTAL = 1025;
 
-    // --------------------------
-    // ★ API まとめ取り + 高速化(20並列)
-    // --------------------------
-    async function fetchBatch(start, end) {
-        const tasks = [];
-        for (let id = start; id <= end; id++) {
-            tasks.push(
-                fetch(`https://pokeapi.co/api/v2/pokemon-species/${id}`)
-                    .then(res => res.json())
-                    .then(data => {
-                        const jp = data.names.find(n => n.language.name === "ja-Hrkt")?.name;
-                        const en = data.name;
-                        if (jp) nameMap[jp.toLowerCase()] = en;
-                    })
-                    .catch(() => {})
-            );
-        }
-        await Promise.all(tasks);
-    }
-    // ★ 読み込み完了までボタン無効化 & メッセージ表示
+    // ★ 高速版：1回で全species取得 → 各詳細を並列読み込み
     async function loadJapaneseNames() {
         const btn = document.getElementById("search-btn");
         const loadingMsg = document.getElementById("loading");
 
         btn.disabled = true;
-        loadingMsg.innerHTML = "図鑑情報取得中…（初回のみ時間がかかります）";
+        loadingMsg.innerHTML = "図鑑情報取得中…（初回のみ）";
 
-        for (let id = 1; id <= 1025; id++) {
-            try {
-                const res = await fetch(`https://pokeapi.co/api/v2/pokemon-species/${id}`);
-                const data = await res.json();
+        try {
+            // 1. 全 species 一括取得
+            const listRes = await fetch("https://pokeapi.co/api/v2/pokemon-species?limit=2000");
+            const listData = await listRes.json();
 
-                const japaneseName = data.names.find(n => n.language.name === "ja-Hrkt")?.name;
-                const englishName = data.name;
+            const urls = listData.results.map(x => x.url);
+            let loaded = 0;
 
-                if (japaneseName) {
-                    nameMap[japaneseName.toLowerCase()] = englishName;
-                }
-            } catch (e) {
-                console.error("読み込み失敗:", id);
+            // 2. 各種データを並列 fetch（Promise.all で高速化）
+            const speciesData = await Promise.all(
+                urls.map(async url => {
+                    const res = await fetch(url);
+                    const data = await res.json();
+
+                    // 進捗表示（体感速度UP）
+                    loaded++;
+                    if (loaded % 50 === 0) {
+                        loadingMsg.innerHTML = `読み込み中… ${loaded}/${urls.length}`;
+                    }
+                    return data;
+                })
+            );
+
+            // 3. 日本語名 → 英語名 の対応表を作成
+            for (const data of speciesData) {
+                const jp = data.names.find(n => n.language.name === "ja-Hrkt")?.name;
+                const en = data.name;
+                if (jp) nameMap[jp.toLowerCase()] = en;
             }
+        } catch (e) {
+            console.error(e);
+            loadingMsg.innerHTML = "読み込み失敗しました";
         }
 
-        btn.disabled = false;
         loadingMsg.innerHTML = "";
+        btn.disabled = false;
     }
+
     loadJapaneseNames();
 
 
+    // 以下は元のままでOK
     function normalizeName(inputName) {
         if (!inputName) return null;
         const name = inputName.trim().toLowerCase();
@@ -140,7 +64,6 @@
 
         return name;
     }
-
 
     async function fetchDexNumber(name) {
         try {
@@ -156,7 +79,6 @@
             return null;
         }
     }
-
 
     async function searchAll() {
         const results = document.getElementById("results");
@@ -213,6 +135,3 @@
         }
     }
 </script>
-
-</body>
-</html>
