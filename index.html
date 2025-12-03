@@ -75,63 +75,20 @@
 <div id="warning"></div>
 
 <script>
-let nameMap = {};
-let allSpeciesList = [];
-const STORAGE_KEY = "pokedex_nameMap_v1";   // バージョン管理付き
+let nameMap = {};        // 日本語名 → { en, id }
+let allSpeciesList = []; // 一覧URL
 
 // ----------------------
-// localStorage からロード
-// ----------------------
-function loadFromStorage() {
-    try {
-        const json = localStorage.getItem(STORAGE_KEY);
-        if (!json) return false;
-
-        nameMap = JSON.parse(json);
-
-        // データ破損チェック
-        if (!nameMap || typeof nameMap !== "object") return false;
-
-        console.log("localStorage から図鑑データ読込成功");
-        return true;
-
-    } catch (e) {
-        console.error("localStorage 読み込み失敗", e);
-        return false;
-    }
-}
-
-// ----------------------
-// localStorage に保存
-// ----------------------
-function saveToStorage() {
-    try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(nameMap));
-        console.log("localStorage に図鑑データ保存完了");
-    } catch (e) {
-        console.error("localStorage 保存失敗", e);
-    }
-}
-
-
-// ----------------------
-// 図鑑データロード（20並列）
+// 図鑑情報ロード（20並列）
 // ----------------------
 async function loadJapaneseNames() {
     const btn = document.getElementById("search-btn");
     const loadingMsg = document.getElementById("loading");
 
-    // localStorage にデータがあれば即ロード完了！
-    if (loadFromStorage()) {
-        loadingMsg.innerHTML = "";
-        btn.disabled = false;
-        return;
-    }
-
     btn.disabled = true;
     loadingMsg.innerHTML = "図鑑情報取得中…（初回のみ時間がかかります）";
 
-    // 一覧取得
+    // 一覧取得（1回）
     const listRes = await fetch("https://pokeapi.co/api/v2/pokemon-species?limit=2000");
     const listData = await listRes.json();
     allSpeciesList = listData.results.slice(0, 1025);
@@ -139,6 +96,7 @@ async function loadJapaneseNames() {
     const total = allSpeciesList.length;
     let completed = 0;
 
+    // 1件処理関数（安全版）
     async function fetchSpeciesData(url) {
         try {
             const res = await fetch(url);
@@ -161,12 +119,11 @@ async function loadJapaneseNames() {
         } finally {
             completed++;
             const percent = Math.floor((completed / total) * 100);
-            loadingMsg.innerHTML =
-                `図鑑情報取得中… ${completed} / ${total}（${percent}%）`;
+            loadingMsg.innerHTML = `図鑑情報取得中… ${completed} / ${total}（${percent}%）`;
         }
     }
 
-    // 20並列
+    // ------- 20並列実行 -------
     const concurrency = 20;
     let index = 0;
 
@@ -180,27 +137,23 @@ async function loadJapaneseNames() {
 
     await Promise.all(workers);
 
-    // 完了 → localStorage に保存
-    saveToStorage();
-
     loadingMsg.innerHTML = "";
     btn.disabled = false;
 }
 
-
 // ----------------------
-// 名前正規化
+// 名前正規化（エラー安全版）
 // ----------------------
 function normalizeName(inputName) {
     if (!inputName) return null;
     const name = inputName.trim().toLowerCase();
 
-    // 日本語一致
+    // 日本語名検索
     for (const jp of Object.keys(nameMap)) {
         if (jp.startsWith(name)) return jp;
     }
 
-    // 英語一致
+    // 英語名検索
     for (const obj of Object.values(nameMap)) {
         if (obj && obj.en && obj.en.startsWith(name)) {
             return obj.en;
@@ -211,14 +164,16 @@ function normalizeName(inputName) {
 }
 
 // ----------------------
-// 図鑑番号取得
+// 図鑑番号取得（キャッシュのみ）
 // ----------------------
 function fetchDexNumber(inputName) {
     const normalized = normalizeName(inputName);
     if (!normalized) return null;
 
+    // 日本語名で一致
     if (nameMap[normalized]) return nameMap[normalized].id;
 
+    // 英語名で一致
     for (const obj of Object.values(nameMap)) {
         if (obj.en === normalized) return obj.id;
     }
@@ -226,9 +181,8 @@ function fetchDexNumber(inputName) {
     return null;
 }
 
-
 // ----------------------
-// 検索処理
+// 検索処理本体
 // ----------------------
 async function searchAll() {
     const results = document.getElementById("results");
@@ -254,8 +208,9 @@ async function searchAll() {
         const dex = fetchDexNumber(name);
 
         if (dex) {
-            html += `<div class="result-item">${name} → 図鑑番号：${dex}</div>`;
-            allDigits += dex.toString();
+            const dexStr = dex.toString().padStart(3, "0");
+            html += `<div class="result-item">${name} → 図鑑番号：${dexStr}</div>`;
+            allDigits += dexStr;
         } else {
             html += `<div class="result-item">${name} → 見つかりません</div>`;
         }
@@ -263,6 +218,7 @@ async function searchAll() {
 
     results.innerHTML = html || "入力がありません。";
 
+    // 数字集計
     if (allDigits.length > 0) {
         const count = Array(10).fill(0);
         for (let ch of allDigits) count[ch]++;
