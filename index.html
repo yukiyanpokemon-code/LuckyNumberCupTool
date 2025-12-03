@@ -73,6 +73,7 @@
 <div id="results"></div>
 <div id="digit-count"></div>
 <div id="warning"></div>
+<div id="kouho"></div>
 
 <script>
 let nameMap = {};        // 日本語名 → { en, id }
@@ -239,6 +240,103 @@ async function searchAll() {
                 `⚠️ 数字「${alertDigits.join(", ")}」が3つ以上含まれています！`;
         }
     }
+    // 取得できた図鑑番号の数を確認
+    let validCount = 0;
+    for (let name of inputs) {
+       if (name.trim() && fetchDexNumber(name)) validCount++;
+    }
+
+    // ★ 5体のときのみ追加処理を実行 ★
+    if (validCount === 5) {
+        showUnusedDigitPokemon(allDigits);
+    }
+// ----------------------------------------------------
+// 使用回数1回以下の数字 → 3桁番号生成（重複は最大2回まで）
+// ----------------------------------------------------
+function showUnusedDigitPokemon(allDigits) {
+    const resultArea = document.getElementById("results");
+
+    // 使用回数カウント
+    const count = Array(10).fill(0);
+    for (let ch of allDigits) count[ch]++;
+
+    // 使用回数1以下の数字を対象に
+    const targetDigits = [];
+    const digitLimit = {}; // 各数字の3桁内での使用可能回数
+
+    for (let d = 0; d <= 9; d++) {
+        if (count[d] <= 1) {
+            targetDigits.push(d.toString());
+            digitLimit[d] = (count[d] === 0 ? 2 : 1);
+            // ★ 使用0回 → 最大2回まで
+            // ★ 使用1回 → 最大1回（重複禁止）
+        }
+    }
+
+    if (targetDigits.length === 0) return;
+
+    let hitList = [];
+    const hitSet = new Set();
+
+    // -----------------------------------------
+    // ★ 3桁番号 ABC の全パターンを brute force 生成
+    // -----------------------------------------
+    for (const a of targetDigits) {
+        for (const b of targetDigits) {
+            for (const c of targetDigits) {
+
+                // 使用回数の仮カウント
+                const tempCount = {};
+                tempCount[a] = (tempCount[a] || 0) + 1;
+                tempCount[b] = (tempCount[b] || 0) + 1;
+                tempCount[c] = (tempCount[c] || 0) + 1;
+
+                // 数字ごとの使用可能回数をチェック
+                let valid = true;
+                for (const digit of [a, b, c]) {
+                    const d = parseInt(digit, 10);
+                    if (tempCount[digit] > digitLimit[d]) {
+                        valid = false;
+                        break;
+                    }
+                }
+                if (!valid) continue;
+
+                // 3桁番号作成
+                const dexNum = a + b + c;
+                const dex = parseInt(dexNum, 10);
+
+                // 対応するポケモン検索
+                const found = Object.keys(nameMap).find(
+                    jp => nameMap[jp].id === dex
+                );
+
+                if (found) {
+                    const line = `No.${dexNum} → ${found}`;
+                    if (!hitSet.has(line)) {
+                        hitSet.add(line);
+                        hitList.push(line);
+                    }
+                }
+            }
+        }
+    }
+
+    // -----------------------------------------
+    // 出力
+    // -----------------------------------------
+    let html = "<h3>残り１枠の候補ポケモン</h3>";
+
+    if (hitList.length === 0) {
+        html += "該当ポケモンはいませんでした。";
+    } else {
+        html += hitList.join("<br>");
+    }
+
+    kouho.innerHTML += "<br>" + html;
+}
+
+
 }
 
 // 起動時ロード開始
